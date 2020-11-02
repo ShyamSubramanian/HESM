@@ -441,6 +441,542 @@ def sample_additional_data_for_item_v1_1(item, additional_data_dictionary):
     return res_sentids_list, flags
 
 
+# TODO: Make code readable
+def sample_additional_data_for_item_esets(item, additional_data_dictionary,
+                                            max_eset = 3, max_esent_per_eset = 3, max_total_esent = 5):
+    #TODO: Evidences NO SORT
+    res_sentids_list = []
+    flags = []
+    
+
+    if item['verifiable'] == "VERIFIABLE":
+        assert item['label'] == 'SUPPORTS' or item['label'] == 'REFUTES'
+        e_list = check_sentences.check_and_clean_evidence_nosort(item)
+        current_id = item['id']
+        assert current_id in additional_data_dictionary
+        additional_data = additional_data_dictionary[current_id]['predicted_sentids']
+        
+        def get_predicted_evidence(additional_data, e_list):
+            rdata = [] 
+            tot_esent = 0
+            num_evid = 0
+            for ae_set in additional_data:
+                currset = []
+                for i_ae, (ae, ae_s, ae_p) in enumerate(ae_set):
+                    if i_ae < max_esent_per_eset:
+                        currset.append(ae_set[i_ae])
+                        tot_esent += 1
+                    else:
+                        break
+                
+                if len(currset) > 0:
+                    rdata.append(currset)
+                    num_evid += 1
+
+                if num_evid >= max_eset or tot_esent >= max_total_esent:
+                    break
+            
+            all_em_f, all_em_w, all_pm_f, all_pm_w = compute_checks(rdata, e_list)
+
+            eset_labels = []
+            evid_label = 'NOT ENOUGH INFO'
+            for i_r, rset in enumerate(rdata):
+                em_f, em_w, pm_f, pm_w = all_em_f[i_r], all_em_w[i_r], all_pm_f[i_r], all_pm_w[i_r]
+                if any(em_f) or any(em_w):
+                    eset_labels.append(item['label'])
+                    evid_label = item['label']
+                else:
+                    eset_labels.append('NOT ENOUGH INFO')
+            
+            return rdata, eset_labels, evid_label
+
+        def compute_checks(additional_data, e_list):
+            all_em_f, all_em_w, all_pm_f, all_pm_w = [], [], [], []
+            for ae_set in additional_data:
+                em_f, em_w, pm_f, pm_w = [], [], [], []       
+                for e_set in e_list:
+                    nevi = len(e_set)
+                    cur_m_f = 0
+                    cur_m_w = 0
+                    for i_e, e in enumerate(e_set):
+                        for i_ae, (ae, ae_s, ae_p) in enumerate(ae_set):
+                            docid, ln = ae.split(c_scorer.SENT_LINE)
+                            if e == (docid, int(ln)):
+                                if i_ae == 0:
+                                    cur_m_f += 1
+                                cur_m_w += 1
+                    
+                    if nevi <= 0:
+                        em_f.append(1)
+                        em_w.append(0)
+                        pm_f.append(0)
+                        pm_w.append(0)
+                    elif nevi == 1:
+                        assert cur_m_f <= 1
+                        if cur_m_f == 1:
+                            em_f.append(1)
+                            em_w.append(0)
+                        else:
+                            em_f.append(0)
+                            assert cur_m_w <= 1
+                            if cur_m_w == 1:
+                                em_w.append(1)
+                            else:
+                                em_w.append(0)
+                        pm_f.append(0)
+                        pm_w.append(0)
+                    elif nevi > 1:
+                        em_f.append(0)
+                        assert cur_m_w <= nevi
+                        if cur_m_w == nevi:
+                            em_w.append(1)
+                            pm_f.append(0)
+                            pm_w.append(0)
+                        else:
+                            em_w.append(0)
+                            if cur_m_w > 0:
+                                if cur_m_f > 0:
+                                    pm_f.append(1)
+                                    pm_w.append(0)
+                                else:
+                                    pm_f.append(0)
+                                    pm_w.append(1)
+                            else:
+                                pm_w.append(0)
+                                pm_f.append(0)
+
+                #print(len(e_list) , len(em_f) , len(em_w) , len(pm_f) , len(pm_w))
+                assert len(e_list) == len(em_f) == len(em_w) == len(pm_f) == len(pm_w)
+                
+                all_em_f.append(em_f)
+                all_em_w.append(em_w)
+                all_pm_f.append(pm_f)
+                all_pm_w.append(pm_w)
+            
+            return all_em_f, all_em_w, all_pm_f, all_pm_w
+
+        def check_equal_evidencesets(prev_eset_list, e_sets2):
+            for e_sets1 in prev_eset_list:
+                e_sets1 = e_sets1[0]
+                is_eq = e_sets1 == e_sets2 
+                if is_eq:
+                    return True
+            return False
+
+        # STEP 1: Adding predicted evidence
+        rdata, eset_labels, evid_label = get_predicted_evidence(additional_data, e_list)
+        all_evidences = []
+        all_probs = []
+        num_evid = 0
+        num_sent = 0
+        for i_r, rset in enumerate(rdata):
+            new_evidences = check_sentences.EvidencesNoSort([])
+            prob_list = []
+            num_sent_per_set = 0
+            for r, s, p in rset:
+                if num_sent_per_set < max_esent_per_eset:
+                    doc_id = r.split(c_scorer.SENT_LINE)[0]
+                    ln = int(r.split(c_scorer.SENT_LINE)[1])
+                    if new_evidences.add_sent(doc_id, ln):
+                        prob_list.append(p)
+                        num_sent_per_set += 1
+                        num_sent += 1
+                else:
+                    break
+
+            all_evidences.append(new_evidences)
+            all_probs.append(prob_list)
+            num_evid += 1
+
+            if (num_evid >= max_eset or num_sent >= max_total_esent):
+                break
+                
+
+        if len(all_evidences) != 0 and not check_equal_evidencesets(res_sentids_list, all_evidences):
+            res_sentids_list.append((all_evidences, all_probs, eset_labels, evid_label))
+
+        # STEP 2: Adding Single evidence
+        all_em_f, all_em_w, all_pm_f, all_pm_w = compute_checks(additional_data, e_list)
+
+        for i_e, eset in enumerate(e_list):
+            em_f, em_w, pm_f, pm_w = [x[i_e] for x in all_em_f], [x[i_e] for x in all_em_w], [x[i_e] for x in all_pm_f], [x[i_e] for x in all_pm_w]
+            nz_em_f, nz_em_w, nz_pm_f, nz_pm_w = np.nonzero(em_f)[0], np.nonzero(em_w)[0], np.nonzero(pm_f)[0], np.nonzero(pm_w)[0]
+            if len(nz_em_f) > 0 or len(nz_em_w) > 0:
+                # Only one matching evidence is enough
+                if len(nz_em_f) > 0:
+                    cur_m_ind = nz_em_f[0]
+                    cur_m_mode = 'em_f'
+                elif len(nz_em_w) > 0:
+                    cur_m_ind = nz_em_w[0]
+                    cur_m_mode = 'em_w'
+
+                new_evidences = check_sentences.EvidencesNoSort([])
+                ae_set = additional_data[cur_m_ind]
+                prob_list = []
+                all_evidences, all_m_evidences = [], []
+                all_probs, all_m_probs = [], []
+                num_m_sent = 0
+                num_sent = 0
+                num_sent_per_set = 0
+                for sampled_e, sampled_s, sampled_p in ae_set:
+                    if num_sent_per_set < max_esent_per_eset:
+                        doc_id = sampled_e.split(c_scorer.SENT_LINE)[0]
+                        ln = int(sampled_e.split(c_scorer.SENT_LINE)[1])
+                        if new_evidences.add_sent(doc_id, ln):
+                            prob_list.append(sampled_p)
+                            num_sent += 1
+                            num_m_sent += 1
+                            num_sent_per_set += 1
+                
+                all_evidences.append(new_evidences)
+                all_probs.append(prob_list) 
+                eset_labels = [item['label']]
+                evid_label = item['label']
+                
+                all_m_evidences.append(new_evidences)
+                all_m_probs.append(prob_list)
+                eset_m_labels = [item['label']]
+                evid_m_label = item['label']
+
+                num_evid = 1
+                num_m_evid = 1
+                is_found_mult_evid = False
+                for i_ae, ae_set in enumerate(additional_data):
+                    a_em_f, a_em_w, a_pm_f, a_pm_w = all_em_f[i_ae], all_em_w[i_ae], all_pm_f[i_ae], all_pm_w[i_ae]
+                    if not (any(a_em_f) or any(a_em_w)):
+                        new_evidences = check_sentences.EvidencesNoSort([])
+                        prob_list = []
+                        num_sent_per_set = 0
+                        for sampled_e, sampled_s, sampled_p in ae_set:
+                            if num_sent_per_set < max_esent_per_eset:
+                                doc_id = sampled_e.split(c_scorer.SENT_LINE)[0]
+                                ln = int(sampled_e.split(c_scorer.SENT_LINE)[1])
+                                if new_evidences.add_sent(doc_id, ln):
+                                    prob_list.append(sampled_p)
+                                    num_sent += 1
+                                    num_sent_per_set += 1
+                        num_evid += 1
+
+                        all_evidences.append(new_evidences)
+                        all_probs.append(prob_list)
+                        eset_labels.append('NOT ENOUGH INFO')
+                        if (num_evid >= max_eset or num_sent >= max_total_esent):
+                            break
+                    else:
+                        if not ((len(nz_em_f)>0 and i_ae == nz_em_f[0] and cur_m_mode == 'em_f') or (len(nz_em_w)>0 and i_ae == nz_em_w[0] and cur_m_mode == 'em_w')):
+                            is_found_mult_evid = True
+
+                if len(all_evidences) != 0 and not check_equal_evidencesets(res_sentids_list, all_evidences):
+                    res_sentids_list.append((all_evidences, all_probs, eset_labels, evid_label))
+
+                if is_found_mult_evid:
+                    for i_ae, ae_set in enumerate(additional_data):
+                        if not ((len(nz_em_f)>0 and i_ae == nz_em_f[0] and cur_m_mode == 'em_f') or (len(nz_em_w)>0 and i_ae == nz_em_w[0] and cur_m_mode == 'em_w')):
+                            a_em_f, a_em_w, a_pm_f, a_pm_w = all_em_f[i_ae], all_em_w[i_ae], all_pm_f[i_ae], all_pm_w[i_ae]
+                            new_evidences = check_sentences.EvidencesNoSort([])
+                            prob_list = []
+                            num_sent_per_set = 0
+                            for sampled_e, sampled_s, sampled_p in ae_set:
+                                if num_sent_per_set < max_esent_per_eset:
+                                    doc_id = sampled_e.split(c_scorer.SENT_LINE)[0]
+                                    ln = int(sampled_e.split(c_scorer.SENT_LINE)[1])
+                                    if new_evidences.add_sent(doc_id, ln):
+                                        prob_list.append(sampled_p) 
+                                        num_m_sent += 1
+                                        num_sent_per_set += 1
+
+                            num_m_evid += 1
+                            all_m_evidences.append(new_evidences)
+                            all_m_probs.append(prob_list)
+                            if not (any(a_em_f) or any(a_em_w)):
+                                eset_m_labels.append('NOT ENOUGH INFO')
+                            else:
+                                eset_m_labels.append(item['label'])
+
+                            if (num_m_evid >= max_eset or num_m_sent >= max_total_esent):
+                                break
+
+                    if len(all_m_evidences) != 0 and not check_equal_evidencesets(res_sentids_list, all_m_evidences):
+                        res_sentids_list.append((all_m_evidences, all_m_probs, eset_m_labels, evid_label))
+
+            elif len(nz_pm_f) > 0:
+                # Only one matching evidence is enough
+                if len(nz_pm_f) > 0:
+                    cur_m_ind = nz_pm_f[0]
+                    cur_m_mode = 'pm_f'
+
+                new_evidences = check_sentences.EvidencesNoSort([])
+                extra_m_evidences = check_sentences.EvidencesNoSort([])
+                extra_evidences = check_sentences.EvidencesNoSort([])
+                extra_m_probs = []
+                extra_probs = []
+                ae_set = additional_data[cur_m_ind]
+
+                # Mark the places of non-ground truth evid sentences
+                f_m = 0 
+                num_sent_per_set = 0
+                prob_list = []
+                all_evidences, all_m_evidences = [], []
+                all_probs, all_m_probs = [], []
+                num_m_sent = 0
+                num_sent = 0
+                m_ae = [0]*len(ae_set)
+
+                for i_e, e in enumerate(eset):
+                    is_there = False
+                    for i_ae, (ae, ae_s, ae_p) in enumerate(ae_set):
+                        doc_id, ln = ae.split(c_scorer.SENT_LINE)
+                        if (doc_id, int(ln)) == e:
+                            if i_e == 0:
+                                f_m = i_ae
+                            
+                            is_there = True
+
+                            if num_sent_per_set < max_esent_per_eset:
+                                if new_evidences.add_sent(doc_id, int(ln)):
+                                    prob_list.append(ae_p)
+                                    num_sent_per_set += 1
+                                    num_sent += 1
+                                    num_m_sent += 1
+                        else:
+                            m_ae[i_ae]=1
+                    
+                    if is_there == False:
+                        if num_sent_per_set < max_esent_per_eset:
+                            if new_evidences.add_sent(*e):
+                                prob_list.append(0.5)
+                                num_sent_per_set += 1
+                                num_sent += 1
+                                num_m_sent += 1
+
+                for i_ae, m in enumerate(m_ae):
+                    if m == 0:
+                        ae, ae_s, ae_p = ae_set[i_ae]
+                        doc_id, ln = ae.split(c_scorer.SENT_LINE)
+                        if extra_evidences.add_sent(doc_id, int(ln)):
+                            extra_probs.append(ae_p)
+
+                # Need Random?                
+                for e, p in zip(extra_evidences, extra_probs):
+                    if num_sent_per_set < max_esent_per_eset:
+                        if new_evidences.add_sent(*e):
+                            prob_list.append(p)
+                            num_sent_per_set += 1
+                            num_sent += 1
+                            num_m_sent += 1
+                    else:
+                        break
+                
+                all_evidences.append(new_evidences)
+                all_probs.append(prob_list) 
+                eset_labels = [item['label']]
+                evid_label = item['label']
+                
+                all_m_evidences.append(new_evidences)
+                all_m_probs.append(prob_list)
+                eset_m_labels = [item['label']]
+                evid_m_label = item['label']
+
+                num_evid = 1
+                num_m_evid = 1
+                is_found_mult_evid = False
+
+                for i_ae, ae_set in enumerate(additional_data):
+                    a_em_f, a_em_w, a_pm_f, a_pm_w = all_em_f[i_ae], all_em_w[i_ae], all_pm_f[i_ae], all_pm_w[i_ae]
+                    if not (any(a_em_f) or any(a_em_w)):
+                        new_evidences = check_sentences.EvidencesNoSort([])
+                        prob_list = []
+                        num_sent_per_set = 0
+                        for sampled_e, sampled_s, sampled_p in ae_set:
+                            if num_sent_per_set < max_esent_per_eset:
+                                doc_id = sampled_e.split(c_scorer.SENT_LINE)[0]
+                                ln = int(sampled_e.split(c_scorer.SENT_LINE)[1])
+                                if new_evidences.add_sent(doc_id, ln):
+                                    prob_list.append(sampled_p)
+                                    num_sent += 1
+                                    num_sent_per_set += 1
+                        num_evid += 1
+
+                        all_evidences.append(new_evidences)
+                        all_probs.append(prob_list)
+                        eset_labels.append('NOT ENOUGH INFO')
+                        if (num_evid >= max_eset or num_sent >= max_total_esent):
+                            break
+                    else:
+                        if not ((len(nz_pm_f)>0 and i_ae == nz_pm_f[0] and cur_m_mode == 'pm_f')):
+                            is_found_mult_evid = True
+
+                if len(all_evidences) != 0 and not check_equal_evidencesets(res_sentids_list, all_evidences):
+                    res_sentids_list.append((all_evidences, all_probs, eset_labels, evid_label))
+
+                if is_found_mult_evid:
+                    for i_ae, ae_set in enumerate(additional_data):
+                        if not ((len(nz_pm_f)>0 and i_ae == nz_pm_f[0] and cur_m_mode == 'pm_f')):
+                            a_em_f, a_em_w, a_pm_f, a_pm_w = all_em_f[i_ae], all_em_w[i_ae], all_pm_f[i_ae], all_pm_w[i_ae]
+                            new_evidences = check_sentences.EvidencesNoSort([])
+                            prob_list = []
+                            num_sent_per_set = 0
+                            for sampled_e, sampled_s, sampled_p in ae_set:
+                                if num_sent_per_set < max_esent_per_eset:
+                                    doc_id = sampled_e.split(c_scorer.SENT_LINE)[0]
+                                    ln = int(sampled_e.split(c_scorer.SENT_LINE)[1])
+                                    if new_evidences.add_sent(doc_id, ln):
+                                        prob_list.append(sampled_p) 
+                                        num_m_sent += 1
+                                        num_sent_per_set += 1
+                            
+                            num_m_evid += 1
+                            all_m_evidences.append(new_evidences)
+                            all_m_probs.append(prob_list)
+                            if not (any(a_em_f) or any(a_em_w)):
+                                eset_m_labels.append('NOT ENOUGH INFO')
+                            else:
+                                eset_m_labels.append(item['label'])
+
+                            if (num_m_evid >= max_eset or num_m_sent >= max_total_esent):
+                                break
+                    
+                    if len(all_m_evidences) != 0 and not check_equal_evidencesets(res_sentids_list, all_m_evidences):
+                        res_sentids_list.append((all_m_evidences, all_m_probs, eset_m_labels, evid_label))
+            
+            else:
+                # Only one matching evidence is enough
+                new_evidences = check_sentences.EvidencesNoSort([])
+                num_sent_per_set = 0
+                prob_list = []
+                all_evidences, all_m_evidences = [], []
+                all_probs, all_m_probs = [], []
+                num_m_sent = 0
+                num_sent = 0
+
+                for e in eset:
+                    if num_sent_per_set < max_total_esent:
+                        if new_evidences.add_sent(*e):
+                            num_sent_per_set += 1
+                            num_m_sent += 1
+                            num_sent += 1
+                    else:
+                        break
+
+                prob_list = [0.5] * len(new_evidences)
+                
+                all_evidences.append(new_evidences)
+                all_probs.append(prob_list) 
+                eset_labels = [item['label']]
+                evid_label = item['label']
+                
+                all_m_evidences.append(new_evidences)
+                all_m_probs.append(prob_list)
+                eset_m_labels = [item['label']]
+                evid_m_label = item['label']
+
+                num_evid = 1
+                num_m_evid = 1
+                is_found_mult_evid = False
+
+                for i_ae, ae_set in enumerate(additional_data):
+                    a_em_f, a_em_w, a_pm_f, a_pm_w = all_em_f[i_ae], all_em_w[i_ae], all_pm_f[i_ae], all_pm_w[i_ae]
+                    if not (any(a_em_f) or any(a_em_w)):
+                        new_evidences = check_sentences.EvidencesNoSort([])
+                        prob_list = []
+                        num_sent_per_set = 0
+                        for sampled_e, sampled_s, sampled_p in ae_set:
+                            if num_sent_per_set < max_esent_per_eset:
+                                doc_id = sampled_e.split(c_scorer.SENT_LINE)[0]
+                                ln = int(sampled_e.split(c_scorer.SENT_LINE)[1])
+                                if new_evidences.add_sent(doc_id, ln):
+                                    prob_list.append(sampled_p)
+                                    num_sent += 1
+                                    num_sent_per_set += 1
+                        num_evid += 1
+
+                        all_evidences.append(new_evidences)
+                        all_probs.append(prob_list)
+                        eset_labels.append('NOT ENOUGH INFO')
+                        if (num_evid >= max_eset or num_sent >= max_total_esent):
+                            break
+                    else:
+                        is_found_mult_evid = True
+
+                if len(all_evidences) != 0 and not check_equal_evidencesets(res_sentids_list, all_evidences):
+                    res_sentids_list.append((all_evidences, all_probs, eset_labels, evid_label))
+                    #print("3: ", all_evidences)
+
+                if is_found_mult_evid:
+                    for i_ae, ae_set in enumerate(additional_data):
+                        a_em_f, a_em_w, a_pm_f, a_pm_w = all_em_f[i_ae], all_em_w[i_ae], all_pm_f[i_ae], all_pm_w[i_ae]
+                        new_evidences = check_sentences.EvidencesNoSort([])
+                        prob_list = []
+                        num_sent_per_set = 0
+                        for sampled_e, sampled_s, sampled_p in ae_set:
+                            if num_sent_per_set < max_esent_per_eset:
+                                doc_id = sampled_e.split(c_scorer.SENT_LINE)[0]
+                                ln = int(sampled_e.split(c_scorer.SENT_LINE)[1])
+                                if new_evidences.add_sent(doc_id, ln):
+                                    prob_list.append(sampled_p) 
+                                    num_m_sent += 1
+                                    num_sent_per_set += 1
+                        
+                        num_m_evid += 1
+                        all_m_evidences.append(new_evidences)
+                        all_m_probs.append(prob_list)
+                        if not (any(a_em_f) or any(a_em_w)):
+                            eset_m_labels.append('NOT ENOUGH INFO')
+                        else:
+                            eset_m_labels.append(item['label'])
+
+                        if (num_m_evid >= max_eset or num_m_sent >= max_total_esent):
+                            break
+                    
+                    if len(all_m_evidences) != 0 and not check_equal_evidencesets(res_sentids_list, all_m_evidences):
+                        res_sentids_list.append((all_m_evidences, all_m_probs, eset_m_labels, evid_label))
+
+    elif item['verifiable'] == "NOT VERIFIABLE":
+        assert item['label'] == 'NOT ENOUGH INFO'
+
+        e_list = check_sentences.check_and_clean_evidence(item)
+        current_id = item['id']
+        additional_data = additional_data_dictionary[current_id]['predicted_sentids']
+
+        keep_prob = 0.6
+
+        num_evid = 0
+        num_sent = 0
+        all_evidences = []
+        all_probs = []
+        eset_labels = []
+        evid_label = item['label']
+
+        for i_ae, ae_set in enumerate(additional_data):
+            raw_evidences_list = []
+            prob_list = []
+            num_sent_per_set = 0
+            for sampled_e, sampled_s, sampled_p in ae_set:
+                if num_sent_per_set < max_total_esent:
+                    doc_id = sampled_e.split(c_scorer.SENT_LINE)[0]
+                    ln = int(sampled_e.split(c_scorer.SENT_LINE)[1])
+                    if (doc_id, ln) not in raw_evidences_list:
+                        raw_evidences_list.append((doc_id, ln))
+                        prob_list.append(sampled_p)
+                        num_sent_per_set += 1
+                        num_sent += 1
+                
+            new_evidences = check_sentences.EvidencesNoSort(raw_evidences_list)
+            all_evidences.append(new_evidences)
+            all_probs.append(prob_list)
+            eset_labels.append(item['label'])
+
+            num_evid += 1
+
+            if (num_evid >= max_eset or num_sent >= max_total_esent):
+                break
+        
+        if len(all_evidences) != 0:
+            res_sentids_list.append((all_evidences, all_probs, eset_labels, evid_label))
+
+    return res_sentids_list
+
+
 # def sample_additional_data_for_item_v1_2(item, additional_data_dictionary):
 #     """
 #     Created on 04 Oct 2018 10:03:27
@@ -763,6 +1299,74 @@ def adv_simi_sample_with_prob_v1_1(input_file, additional_file, prob_dict_file, 
     return sampled_data_list
 
 
+def adv_simi_sample_with_prob_esets(subset_file, input_file, additional_file, tokenized=False):
+    cursor = fever_db.get_cursor()
+    d_list = load_data(input_file)
+
+    if subset_file is not None:
+        subsetlist = common.read_file_list(subset_file)
+        subsetlist = common.strip_lines(subsetlist)
+        subset_dict = dict()
+        for x in subsetlist:
+            subset_dict[x] = 1
+
+    if isinstance(additional_file, list):
+        additional_d_list = additional_file
+    else:
+        additional_d_list = load_data(additional_file)
+    additional_data_dict = dict()
+
+    for add_item in additional_d_list:
+        additional_data_dict[add_item['id']] = add_item
+
+    sampled_data_list = []
+
+    for itemidx, item in tqdm(enumerate(d_list)):
+
+        if subset_file is not None and str(item['id']) not in subset_dict:
+            continue
+            
+        if item['id'] not in additional_data_dict:
+            break
+
+        sampled_e_list = sample_additional_data_for_item_esets(item, additional_data_dict)
+
+        for mult_sampled_evidence, mult_prob_list, mult_label, label in sampled_e_list:
+
+            new_item = dict()
+            all_evidences = []
+            for i, (sampled_evidence, prob_list, sing_label) in enumerate(zip(mult_sampled_evidence, mult_prob_list, mult_label)):
+                
+                evidence_text_list = evidence_list_to_text_list_nosort(
+                    cursor, sampled_evidence,
+                    contain_head=True, id_tokenized=tokenized)
+
+
+                evidence_text_list_with_prob = []
+                for text, _, prob in zip(evidence_text_list, sampled_evidence, prob_list):
+                    evidence_text_list_with_prob.append((text, prob))
+                
+                all_evidences.append((evidence_text_list_with_prob, sing_label))
+
+            new_item['id'] = str(item['id']) + '#' + str(i)
+
+            if tokenized:
+                new_item['claim'] = item['claim']
+            else:
+                new_item['claim'] = ' '.join(easy_tokenize(item['claim']))
+
+            new_item['evid'] = all_evidences
+
+            new_item['verifiable'] = item['verifiable']
+            new_item['label'] = label
+            new_item['itemidx'] = itemidx
+            sampled_data_list.append(new_item)
+
+    cursor.close()
+
+    return sampled_data_list
+
+
 def evidence_list_to_text_list(cursor, evidences, contain_head=True, id_tokenized=False):
     # One evidence one text and len(evidences) == len(text_list)
     current_evidence_text_list = []
@@ -826,6 +1430,111 @@ def evidence_list_to_text_list_nosort(cursor, evidences, contain_head=True, id_t
 
     assert len(evidences) == len(current_evidence_text_list)
     return current_evidence_text_list
+
+
+def select_sent_with_prob_for_eval_esets(subset_file, input_file, additional_file, tokenized=False, inference=False,
+                                        max_esets = 3, max_esents_per_eset = 3, max_total_esents = 5):
+    cursor = fever_db.get_cursor()
+
+    if subset_file is not None:
+        subset_list = common.read_file_list(subset_file)
+        subset_list = common.strip_lines(subset_list)
+        subset_dict = dict()
+        for x in subset_list:
+            subset_dict[x] = 1
+
+    if isinstance(additional_file, list):
+        additional_d_list = additional_file
+    else:
+        additional_d_list = load_data(additional_file)
+    additional_data_dict = dict()
+
+    for add_item in additional_d_list:
+        additional_data_dict[add_item['id']] = add_item
+
+    d_list = load_data(input_file)
+    d_list_esets = []
+    
+    for item in tqdm(d_list):
+        
+        if subset_file is not None and str(item['id']) not in subset_dict:
+            continue
+
+        esets = additional_data_dict[item['id']]['predicted_sentids']
+        esets = [x[:max_esents_per_eset] for x in esets]
+
+        new_item = copy.deepcopy(item)
+        all_evidences = []
+        cur_e_list = []
+        
+        num_esets = 0 # total evidence sets counter
+        num_sents = 0 # current evidence set sentences counter 
+        
+        is_done = False # set to true when max_esets or max_sents reached
+        for e_list in esets:
+            if not is_done:
+                if not inference:
+                    assert additional_data_dict[new_item['id']]['label'] == new_item['label']
+                    assert additional_data_dict[new_item['id']]['verifiable'] == new_item['verifiable']
+                assert additional_data_dict[new_item['id']]['id'] == new_item['id']
+
+                pred_evidence_list = []
+                prob_list = []
+                for cur_e, _, cur_prob in e_list:
+                    cur_e_list.append(cur_e)
+                    doc_id = cur_e.split(c_scorer.SENT_LINE)[0]
+                    ln = int(cur_e.split(c_scorer.SENT_LINE)[1])
+                    pred_evidence_list.append((doc_id, ln))
+                    prob_list.append(cur_prob)
+                    num_sents += 1
+
+                pred_evidence = check_sentences.EvidencesNoSort(pred_evidence_list)
+
+                evidence_text_list = evidence_list_to_text_list_nosort(cursor, pred_evidence,
+                                                                contain_head=True, id_tokenized=tokenized)
+
+
+                evidence_text_list_with_prob = []
+                for text, (doc_id, ln), prob in zip(evidence_text_list, pred_evidence, prob_list):
+                    evidence_text_list_with_prob.append((text, prob))
+                
+                if not inference:
+                    all_evidences.append((evidence_text_list_with_prob, new_item['label']))
+                else:
+                    all_evidences.append((evidence_text_list_with_prob, 'NOT ENOUGH INFO'))
+
+                num_esets += 1
+
+                if num_esets >= max_esets or num_sents >= max_total_esents:
+                    is_done = True
+            else:
+                for i, (cur_e, _, cur_prob) in enumerate(e_list):
+                    cur_e_list.append(cur_e)
+
+        if len(esets) == 0:
+            all_evidences = []
+
+        new_item = copy.deepcopy(item)
+        
+        # claim
+        if not tokenized:
+            new_item['claim'] = ' '.join(easy_tokenize(new_item['claim']))
+
+        # evidence
+        new_item['evid'] = all_evidences
+
+        # predicted evidence for evidence retrieval score calculation 
+        new_item['predicted_evidence'] = convert_evidence2scoring_format(cur_e_list)
+        new_item['predicted_sentids'] = cur_e_list
+        
+        # if only inference, we do not know the label, so set not enough info, this will be ignored during inference
+        # TODO: Change to hidden
+        if inference:
+            new_item['label'] = 'NOT ENOUGH INFO'
+
+        d_list_esets.append(new_item)
+            
+    return d_list_esets
 
 
 def select_sent_with_prob_for_eval(input_file, additional_file, prob_dict_file, tokenized=False, pipeline=False):
