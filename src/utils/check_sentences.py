@@ -4,50 +4,6 @@ from collections import Counter
 from tqdm import tqdm
 
 
-class EvidencesNoSort(object):
-    # Evidences is a list of docid and sentences line number
-    def __init__(self, evidences):
-        self.evidences_list = evidences
-
-    def add_sent(self, sent, ln):
-        e_set = self.evidences_list
-        if (sent, ln) not in e_set:
-            e_set.append((sent, ln))
-            return True
-        return False
-
-    def __eq__(self, o: object) -> bool:
-        if not isinstance(o, EvidencesNoSort):
-            return False
-
-        if len(o.evidences_list) != len(self.evidences_list):
-            return False
-
-        is_eq = True
-        for o, _e in zip(o.evidences_list, self.evidences_list):
-            if o != _e:
-                is_eq = False
-                break
-
-        return is_eq
-
-    def __hash__(self) -> int:
-        hash_str_list = []
-        for doc_id, line_num in self.evidences_list:
-            hash_str_list.append(f'{doc_id}###{line_num}')
-        hash_str = '@'.join(hash_str_list)
-        return hash_str.__hash__()
-
-    def __repr__(self):
-        return '{Evidences: ' + self.evidences_list.__repr__() + '}'
-
-    def __len__(self):
-        return self.evidences_list.__len__()
-
-    def __iter__(self):
-        return self.evidences_list.__iter__()
-
-
 class Evidences(object):
     # Evidences is a list of docid and sentences line number
     def __init__(self, evidences):
@@ -121,22 +77,6 @@ def check_and_clean_evidence(item):
 
         one_annotator_evidences = Evidences(cleaned_one_annotator_evidences_list)
         evidences_list_set.add(one_annotator_evidences)
-
-    return evidences_list_set
-
-
-def check_and_clean_evidence_nosort(item):
-    whole_annotators_evidences = item['evidence']
-    evidences_list_set = list()
-    for one_annotator_evidences_list in whole_annotators_evidences:
-        cleaned_one_annotator_evidences_list = []
-        for evidence in one_annotator_evidences_list:
-            docid, sent_num = evidence[-2], evidence[-1]
-            if (docid, sent_num) not in cleaned_one_annotator_evidences_list:
-                cleaned_one_annotator_evidences_list.append((docid, sent_num))
-
-        one_annotator_evidences = EvidencesNoSort(cleaned_one_annotator_evidences_list)
-        evidences_list_set.append(one_annotator_evidences)
 
     return evidences_list_set
 

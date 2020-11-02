@@ -74,17 +74,6 @@ def doc_id_to_tokenized_text(doc_id, including_lemmas=False):
     return ' '.join(tokenized_doc_id_dict[doc_id]['words'])
 
 
-def read_file_list(filename):
-    with open(filename) as f:
-        clist = f.readlines()
-    return clist
-
-
-def strip_lines(clist):
-    clist = [x.strip() for x in clist]
-    return clist
-
-
 if __name__ == '__main__':
     path_stanford_corenlp_full_2017_06_09 = str(config.PRO_ROOT / 'dep_packages/stanford-corenlp-full-2017-06-09/*')
     print(path_stanford_corenlp_full_2017_06_09)
